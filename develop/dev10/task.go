@@ -1,11 +1,25 @@
 package main
 
+import (
+	"context"
+	"flag"
+	"io"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+)
+
 /*
 === Утилита telnet ===
 
 Реализовать примитивный telnet клиент:
 Примеры вызовов:
-go-telnet --timeout=10s host port go-telnet mysite.ru 8080 go-telnet --timeout=3s 1.1.1.1 123
+go-telnet --timeout=10s host port
+go-telnet mysite.ru 8080
+go-telnet --timeout=3s 1.1.1.1 123
 
 Программа должна подключаться к указанному хосту (ip или доменное имя) и порту по протоколу TCP.
 После подключения STDIN программы должен записываться в сокет, а данные полученные и сокета должны выводиться в STDOUT
@@ -15,6 +29,54 @@ go-telnet --timeout=10s host port go-telnet mysite.ru 8080 go-telnet --timeout=3
 При подключении к несуществующему сервер, программа должна завершаться через timeout.
 */
 
-func main() {
+func receiver(conn *net.Conn) {
+	_, err := io.Copy(os.Stdout, *conn)
+	if err != nil {
+		log.Fatalln("receiver: ", err)
+	}
+}
 
+func sender(conn *net.Conn) {
+	_, err := io.Copy(*conn, os.Stdin)
+	if err != nil {
+		log.Fatalln("sender: ", err)
+	}
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT)
+	defer stop()
+
+	// парсим флаги
+	port := os.Args[len(os.Args)-1]
+	host := os.Args[len(os.Args)-2]
+	timeout := flag.String("timeout", "10s", "Timeout")
+	flag.Parse()
+
+	// парсим таймаут
+	duration, err := time.ParseDuration(*timeout)
+	if err != nil {
+		return
+	}
+
+	// подключаемся к хосту
+	conn, err := net.DialTimeout("tcp", host+":"+port, duration)
+	if err != nil {
+		// по заданию если хост неизвестный, то все равно ждем по таймауту
+		time.Sleep(duration)
+		log.Fatalln("Error dialing: ", err)
+	}
+	defer conn.Close()
+
+	go func() {
+		receiver(&conn)
+		stop()
+	}()
+
+	go func() {
+		sender(&conn)
+		stop()
+	}()
+
+	<-ctx.Done()
 }

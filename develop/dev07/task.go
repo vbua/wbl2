@@ -1,5 +1,11 @@
 package main
 
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
 /*
 === Or channel ===
 
@@ -33,6 +39,44 @@ start := time.Now()
 fmt.Printf(“fone after %v”, time.Since(start))
 */
 
-func main() {
+func or(channels ...<-chan interface{}) <-chan interface{} {
+	out := make(chan interface{})
+	defer close(out)
+	var wg sync.WaitGroup
+	// 1, тк при закрытии хоть одного канала закрываем основной канал
+	wg.Add(1)
+	for _, c := range channels { // пробегаем каналы по циклу
+		go func(c <-chan interface{}) { // создаем на каждый канал горутину, где слушаем сообщения и передаем в главный канал
+			for v := range c {
+				out <- v
+			}
+			// значит какой-то из каналов закрыл, поэтому завершаем работу
+			wg.Done()
+		}(c)
+	}
 
+	wg.Wait()
+	return out
+}
+
+func main() {
+	sig := func(after time.Duration) <-chan interface{} {
+		c := make(chan interface{})
+		go func() {
+			defer close(c)
+			time.Sleep(after)
+		}()
+		return c
+	}
+
+	start := time.Now()
+	<-or(
+		sig(2*time.Hour),
+		sig(5*time.Minute),
+		sig(1*time.Second),
+		sig(1*time.Hour),
+		sig(1*time.Minute),
+	)
+
+	fmt.Printf("fone after %v", time.Since(start))
 }
